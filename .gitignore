@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tgz
+*.log
+.env
+.env.*
+*.key
+*.pem
+config.json
+coverage/

@@ -1,0 +1,23 @@
+{
+  "name": "@alogos/antseed-calibrated-router",
+  "version": "0.1.0",
+  "description": "Difficulty-aware IRP routing provider for AntSeed: ranks candidates by calibrated success probability vs expected cost",
+  "type": "module",
+  "files": ["dist"],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build"
+  },
+  "peerDependencies": {
+    "@antseed/node": ">=0.2.150"
+  },
+  "devDependencies": {
+    "@antseed/node": "0.2.150",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
