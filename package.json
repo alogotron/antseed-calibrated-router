@@ -12,7 +12,8 @@
     "build": "tsc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test && npm run build"
+    "verify": "npm run typecheck && npm test && npm run build",
+    "conformance": "node scripts/conformance.mjs"
   },
   "peerDependencies": {
     "@antseed/node": ">=0.2.150"
@@ -21,5 +22,10 @@
     "@antseed/node": "0.2.150",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alogotron/antseed-calibrated-router.git"
   }
 }

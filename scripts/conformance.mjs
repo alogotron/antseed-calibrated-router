@@ -6,7 +6,11 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { CalibratedRouter } from '../dist/index.js';
 
-const specRoot = new URL('../../_research/irp-spec/', import.meta.url).pathname;
+// Clone https://github.com/inference-routing/spec and point IRP_SPEC_DIR at it; the fallback is the
+// operator's local mirror layout.
+const specRoot = process.env.IRP_SPEC_DIR
+  ? join(process.env.IRP_SPEC_DIR, '/')
+  : new URL('../../_research/irp-spec/', import.meta.url).pathname;
 const require = createRequire(join(specRoot, 'package.json'));
 const Ajv2020 = require('ajv/dist/2020.js').default ?? require('ajv/dist/2020.js');
 const read = (p) => JSON.parse(readFileSync(join(specRoot, p), 'utf8'));

@@ -69,7 +69,8 @@ npm run verify     # typecheck + vitest + build
 npm run conformance
 ```
 
-`conformance` validates generated responses against the official IRP JSON schemas.
+`conformance` validates generated responses against the official IRP JSON schemas. Clone
+`https://github.com/inference-routing/spec` and set `IRP_SPEC_DIR` to its path first.
 
 ## Metrics
 
@@ -79,6 +80,10 @@ JSON line per ranking:
 ```
 CALIBRATED_ROUTER_METRICS_SINK=/path/to/rank-metrics.jsonl
 ```
+
+The AntSeed seller CLI passes plugin settings from process environment variables (it does not read
+a `config` block in `seller.providers`), so set the sink in the service environment, e.g. a systemd
+`Environment=` line.
 
 Record fields: `ts`, `requestId`, `status`, `latencyMs`, `candidates`, `ranked`, `scored`,
 `difficulty`, `domain`, `tradeoff`, `topCandidateId`, `topQuality`, `topCostUsd`, `error`.
