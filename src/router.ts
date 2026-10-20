@@ -11,8 +11,11 @@ import {
 } from '@antseed/node';
 import { canonicalModelKey } from '@antseed/node/model-identity';
 import { analyzeRequest, type RequestProfile } from './difficulty.js';
+import { RouterMetrics, type RankRecord } from './metrics.js';
 
 export const ROUTER_ID = 'alogos-calibrated-router';
+/** Read-only operational snapshot; contains no secrets and no request content. */
+export const METRICS_PATH = '/_alogos/metrics';
 export const ROUTER_VERSION = '0.1.0';
 export const EXTRA_NAMESPACE = 'alogos.xyz';
 export const DEFAULT_SCORES_URL = 'https://modelgrep.com/api/v1/models';
@@ -56,6 +59,10 @@ export type CalibratedRouterOptions = {
   unscoredSkill?: number;
   fetch?: typeof fetch;
   now?: () => number;
+  /** Path for the durable JSONL record of every ranking; omitted keeps metrics in memory only. */
+  metricsSink?: string | null;
+  /** Rolling record window size held in memory. */
+  metricsWindow?: number;
 };
 
 export type Scored = {
@@ -152,9 +159,12 @@ export class CalibratedRouter {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
 
+  readonly metrics: RouterMetrics;
+
   constructor(private readonly options: CalibratedRouterOptions = {}) {
     this.fetchImpl = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
+    this.metrics = new RouterMetrics(options.metricsSink ?? null, options.metricsWindow ?? 500);
   }
 
   async init(): Promise<void> {
@@ -168,9 +178,17 @@ export class CalibratedRouter {
   async handleRequest(request: SerializedHttpRequest): Promise<SerializedHttpResponse> {
     const path = request.path.split('?')[0];
     if (request.method === 'GET' && path === IRP_MODELS_PATH) {
+      this.metrics.modelsListed();
+      this.metrics.request(200);
       return json(request.requestId, 200, { object: 'list', data: this.listModels().map(entry => ({ ...entry, object: 'model' })) });
     }
     if (request.method === 'POST' && path === IRP_RANK_PATH) return this.rank(request);
+    if (request.method === 'GET' && path === METRICS_PATH) {
+      this.metrics.request(200);
+      return json(request.requestId, 200, this.metrics.snapshot());
+    }
+    this.metrics.notFoundRequest();
+    this.metrics.request(404);
     return problem(request.requestId, 404, IRP_PROBLEM_TYPES.invalidRequest, 'Not found', `${request.method} ${path} is not a routing endpoint.`);
   }
 
@@ -195,21 +213,49 @@ export class CalibratedRouter {
   }
 
   private async rank(request: SerializedHttpRequest): Promise<SerializedHttpResponse> {
+    const startedAt = this.now();
+    const base = { requestId: request.requestId, latencyMs: 0, candidates: 0, ranked: 0, scored: 0, difficulty: 0, domain: 'general', tradeoff: IRP_DEFAULT_COST_QUALITY_TRADEOFF, topCandidateId: null, topQuality: null, topCostUsd: null };
+    const finish = (status: number, patch: Partial<Omit<RankRecord, 'ts'>>): void => {
+      this.metrics.request(status);
+      this.metrics.rank({
+        ...base,
+        ...patch,
+        status,
+        latencyMs: Math.round(this.now() - startedAt),
+        error: patch.error ?? null,
+      });
+    };
     let body: IrpRankRequest;
     try {
       const raw: unknown = JSON.parse(new TextDecoder().decode(request.body));
       validateIrpRankRequest(raw);
       body = raw;
     } catch (error) {
-      return problem(request.requestId, 400, IRP_PROBLEM_TYPES.invalidRequest, 'Invalid request', error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      finish(400, { error: message });
+      return problem(request.requestId, 400, IRP_PROBLEM_TYPES.invalidRequest, 'Invalid request', message);
     }
     await this.refreshIfStale();
     const profile = analyzeRequest(body.request as unknown as Record<string, unknown>);
     const tradeoff = body.routing.cost_quality_tradeoff ?? IRP_DEFAULT_COST_QUALITY_TRADEOFF;
-    const ranked = rankScored(this.score(body.routing.candidates, profile), tradeoff, this.options.costWeight ?? DEFAULT_COST_WEIGHT);
+    const candidates = body.routing.candidates;
+    const scored = this.score(candidates, profile);
+    const ranked = rankScored(scored, tradeoff, this.options.costWeight ?? DEFAULT_COST_WEIGHT);
+    const shared = {
+      requestId: request.requestId,
+      candidates: candidates.length,
+      ranked: ranked.length,
+      scored: scored.filter(item => item.scored).length,
+      difficulty: round(profile.difficulty, 3),
+      domain: profile.domain,
+      tradeoff,
+    };
     if (!ranked.length) {
+      finish(422, { ...shared, error: 'no scorable candidate' });
       return problem(request.requestId, 422, IRP_PROBLEM_TYPES.noScorableCandidate, 'No scorable candidate', 'No candidate could be scored.');
     }
+    const top = ranked[0]!;
+    finish(200, { ...shared, topCandidateId: top.candidate.id, topQuality: round(top.quality, 4), topCostUsd: round(top.cost, 8), error: null });
     return json(request.requestId, 200, {
       id: `rank_${randomUUID()}`,
       object: 'routing.ranking',

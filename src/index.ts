@@ -30,6 +30,7 @@ const plugin: AntseedProviderPlugin = {
     { key: 'CALIBRATED_ROUTER_SCORES_URL', label: 'Model Scores URL', type: 'string', required: false, default: DEFAULT_SCORES_URL, description: 'modelgrep-compatible scores; empty ranks at the unscored prior' },
     { key: 'CALIBRATED_ROUTER_REFRESH_SECONDS', label: 'Refresh Interval', type: 'number', required: false, default: DEFAULT_REFRESH_MS / 1000, description: 'How often to refresh model scores' },
     { key: 'ANTSEED_MAX_CONCURRENCY', label: 'Max Concurrency', type: 'number', required: false, default: 50, description: 'Max concurrent ranking requests' },
+    { key: 'CALIBRATED_ROUTER_METRICS_SINK', label: 'Metrics Sink', type: 'string', required: false, default: '', description: 'Path for the durable JSONL record of every ranking; empty keeps metrics in memory only' },
   ],
 
   createProvider(config: Record<string, string>): Provider {
@@ -47,6 +48,7 @@ const plugin: AntseedProviderPlugin = {
       costWeight,
       scoresUrl: config['CALIBRATED_ROUTER_SCORES_URL']?.trim() ?? DEFAULT_SCORES_URL,
       refreshMs: refreshSeconds * 1000,
+      metricsSink: config['CALIBRATED_ROUTER_METRICS_SINK']?.trim() || null,
     });
     let active = 0;
 

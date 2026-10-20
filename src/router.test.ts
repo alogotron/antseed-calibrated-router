@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { IrpCandidate } from '@antseed/node';
-import { CalibratedRouter, expectedCostUsd, rankScored, successProbability, type ScoresPage } from './router.js';
+import type { IrpCandidate, SerializedHttpRequest } from '@antseed/node';
+import { IRP_RANK_PATH } from '@antseed/node';
+import { CalibratedRouter, METRICS_PATH, expectedCostUsd, rankScored, successProbability, type ScoresPage } from './router.js';
 import { analyzeRequest } from './difficulty.js';
 import plugin from './index.js';
 
@@ -157,5 +158,52 @@ describe('plugin', () => {
 
   it('refuses two routing services', () => {
     expect(() => plugin.createProvider({ ANTSEED_ALLOWED_SERVICES: 'a,b' })).toThrow();
+  });
+});
+
+describe('operational metrics', () => {
+  const scores = { data: [{ id: 'openai/gpt-5', benchmarks: { artificial_analysis: { intelligence: 80 } } }], meta: { has_more: false } };
+  const makeRouter = (): CalibratedRouter => new CalibratedRouter({ fetch: (async () => ({ ok: true, status: 200, json: async () => scores })) as unknown as typeof fetch, now: () => 1_000 });
+
+  const rankRequest = (id: string): SerializedHttpRequest => ({
+    requestId: id,
+    method: 'POST',
+    path: IRP_RANK_PATH,
+    headers: {},
+    body: new TextEncoder().encode(JSON.stringify({
+      request: { model: 'any', messages: [{ role: 'user', content: 'write a python function' }] },
+      routing: { candidates: [{ id: 'c1', model: 'openai/gpt-5', pricing: { input: 1, cache_read: 1, output: 2 } }], cost_quality_tradeoff: 5 },
+    })),
+  });
+
+  it('records a successful ranking with its top candidate', async () => {
+    const router = makeRouter();
+    await router.init();
+    await router.handleRequest(rankRequest('r1'));
+    const snap = router.metrics.snapshot();
+    expect(snap.ranks.ok).toBe(1);
+    expect(snap.ranks.failed).toBe(0);
+    expect(snap.ranks.byTopCandidate).toEqual({ c1: 1 });
+    expect(snap.ranks.scoredRatio).toBe(1);
+  });
+
+  it('records malformed requests as failures rather than dropping them', async () => {
+    const router = makeRouter();
+    await router.handleRequest({ requestId: 'bad', method: 'POST', path: IRP_RANK_PATH, headers: {}, body: new TextEncoder().encode('{}') });
+    const snap = router.metrics.snapshot();
+    expect(snap.ranks.failed).toBe(1);
+    expect(snap.ranks.ok).toBe(0);
+    expect(snap.requests.byStatus['400']).toBe(1);
+  });
+
+  it('serves a read-only snapshot without request content', async () => {
+    const router = makeRouter();
+    await router.init();
+    await router.handleRequest(rankRequest('r2'));
+    const response = await router.handleRequest({ requestId: 'm1', method: 'GET', path: METRICS_PATH, headers: {}, body: new Uint8Array() });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(new TextDecoder().decode(response.body));
+    expect(body.ranks.ok).toBe(1);
+    expect(JSON.stringify(body)).not.toContain('python function');
   });
 });
