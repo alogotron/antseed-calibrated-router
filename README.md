@@ -71,6 +71,26 @@ npm run conformance
 
 `conformance` validates generated responses against the official IRP JSON schemas.
 
+## Metrics
+
+Every ranking is recorded. The router keeps a bounded in-memory window and optionally appends one
+JSON line per ranking:
+
+```
+CALIBRATED_ROUTER_METRICS_SINK=/path/to/rank-metrics.jsonl
+```
+
+Record fields: `ts`, `requestId`, `status`, `latencyMs`, `candidates`, `ranked`, `scored`,
+`difficulty`, `domain`, `tradeoff`, `topCandidateId`, `topQuality`, `topCostUsd`, `error`.
+Malformed and unscorable requests are recorded as failures rather than dropped, so the failure rate
+is visible instead of silent.
+
+The snapshot is also available in-process as `router.metrics.snapshot()`.
+
+**Not reachable over the network:** the AntSeed node's P2P mux answers unknown HTTP paths with
+`{"error":"not found"}` (`packages/node/src/p2p/connection-manager.ts:1035`) before a plugin sees the
+request, so a custom status path cannot be served through the node. Consume the JSONL sink instead.
+
 ## Limits
 
 - Difficulty weights are hand-set, not fitted.
