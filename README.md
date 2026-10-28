@@ -54,13 +54,22 @@ Ranking responses include, under `metadata['alogos.xyz']`:
 Each candidate carries `extra['alogos.xyz'].skill` and `scored`, so a consumer can verify the
 inputs to the ranking rather than trusting the ordering.
 
+## Stability
+
+From 1.0.0 the package follows semver. The stable API is the plugin export and its config keys, the named exports from the package root, the `extra['alogos.xyz']` response fields, and the metrics record fields. Difficulty weights, the unscored prior and benchmark normalisation are model parameters. They may change in minor releases and are listed in `CHANGELOG.md`.
+
+Failure behaviour:
+
+- If the score fetch fails, the router keeps the last good scores (or the unscored prior) and retries after 60 s instead of waiting a full refresh interval.
+- Unexpected internal errors return an IRP `urn:irp:problem:unavailable` problem (HTTP 503) with `Retry-After`. `handleRequest` never throws.
+
 ## Install
 
 ```
 npm install @alogos/antseed-calibrated-router
 ```
 
-Requires `@antseed/node >= 0.2.150` as a peer dependency.
+Requires Node.js >= 20 and `@antseed/node >= 0.2.150` as a peer dependency. Only the package root is importable (an `exports` map blocks deep imports).
 
 ## Verify
 

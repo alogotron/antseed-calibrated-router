@@ -1,6 +1,6 @@
 import type { AntseedProviderPlugin, Provider } from '@antseed/node';
 import { IRP_SUGGEST_PROTOCOL } from '@antseed/node';
-import { CalibratedRouter, DEFAULT_COST_WEIGHT, DEFAULT_REFRESH_MS, DEFAULT_SCORES_URL } from './router.js';
+import { CalibratedRouter, DEFAULT_COST_WEIGHT, DEFAULT_REFRESH_MS, DEFAULT_SCORES_URL, ROUTER_VERSION } from './router.js';
 
 export * from './router.js';
 export * from './difficulty.js';
@@ -20,7 +20,7 @@ function nonNegative(raw: string | undefined, fallback: number, key: string): nu
 const plugin: AntseedProviderPlugin = {
   name: 'calibrated-router',
   displayName: 'Calibrated Router',
-  version: '0.1.0',
+  version: ROUTER_VERSION,
   type: 'provider',
   description: 'IRP routing service ranking candidates by per-request difficulty vs benchmark skill and expected cost',
   configSchema: [

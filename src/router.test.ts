@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { IrpCandidate, SerializedHttpRequest } from '@antseed/node';
 import { IRP_RANK_PATH } from '@antseed/node';
-import { CalibratedRouter, METRICS_PATH, expectedCostUsd, rankScored, successProbability, type ScoresPage } from './router.js';
+import { CalibratedRouter, FAILED_REFRESH_RETRY_MS, METRICS_PATH, ROUTER_VERSION, UNAVAILABLE_RETRY_AFTER_SECONDS, expectedCostUsd, rankScored, successProbability, type ScoresPage } from './router.js';
 import { analyzeRequest } from './difficulty.js';
 import plugin from './index.js';
+import { MAX_TOP_CANDIDATE_KEYS, OTHER_TOP_CANDIDATE, RouterMetrics } from './metrics.js';
+import { readFileSync } from 'node:fs';
 
 const page: ScoresPage = {
   data: [
@@ -205,5 +207,65 @@ describe('operational metrics', () => {
     const body = JSON.parse(new TextDecoder().decode(response.body));
     expect(body.ranks.ok).toBe(1);
     expect(JSON.stringify(body)).not.toContain('python function');
+  });
+});
+
+describe('1.0 hardening', () => {
+  it('retries a failed score fetch after the short retry delay, not the full interval', async () => {
+    let t = 1_000_000;
+    let calls = 0;
+    const flaky = (async () => {
+      calls += 1;
+      if (calls === 1) return { ok: false, status: 503, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => page };
+    }) as unknown as typeof fetch;
+    const router = new CalibratedRouter({ fetch: flaky, now: () => t });
+    await router.init();
+    const before = await rank(router, HARD);
+    expect(before.json.ranked.every((item: any) => item.extra['alogos.xyz'].scored === false)).toBe(true);
+    expect(calls).toBe(1);
+    t += FAILED_REFRESH_RETRY_MS;
+    const after = await rank(router, HARD);
+    expect(calls).toBe(2);
+    expect(after.json.ranked.some((item: any) => item.extra['alogos.xyz'].scored === true)).toBe(true);
+  });
+
+  it('keeps the full interval after a successful fetch', async () => {
+    let t = 1_000_000;
+    let calls = 0;
+    const counting = (async () => { calls += 1; return { ok: true, status: 200, json: async () => page }; }) as unknown as typeof fetch;
+    const router = new CalibratedRouter({ fetch: counting, now: () => t });
+    await router.init();
+    t += FAILED_REFRESH_RETRY_MS;
+    await rank(router, HARD);
+    expect(calls).toBe(1);
+  });
+
+  it('bounds the top-candidate map against buyer-supplied ids', () => {
+    const metrics = new RouterMetrics(null, 10);
+    const total = MAX_TOP_CANDIDATE_KEYS + 44;
+    for (let i = 0; i < total; i++) {
+      metrics.rank({ requestId: `r${i}`, status: 200, latencyMs: 1, candidates: 1, ranked: 1, scored: 1, difficulty: 0.5, domain: 'general', tradeoff: 5, topCandidateId: `id-${i}`, topQuality: 0.5, topCostUsd: 0, error: null });
+    }
+    const map = metrics.snapshot().ranks.byTopCandidate;
+    expect(Object.keys(map).length).toBe(MAX_TOP_CANDIDATE_KEYS + 1);
+    expect(map[OTHER_TOP_CANDIDATE]).toBe(44);
+    expect(map['id-0']).toBe(1);
+  });
+
+  it('turns an unexpected internal error into a 503 unavailable problem', async () => {
+    const router = await makeRouter();
+    const broken = { requestId: 'z', method: 'GET', path: undefined, headers: {}, body: new Uint8Array() } as unknown as SerializedHttpRequest;
+    const response = await router.handleRequest(broken);
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['content-type']).toBe('application/problem+json');
+    expect(response.headers['retry-after']).toBe(String(UNAVAILABLE_RETRY_AFTER_SECONDS));
+    expect(JSON.parse(dec.decode(response.body)).type).toBe('urn:irp:problem:unavailable');
+  });
+
+  it('reports one version everywhere (package.json, plugin, router)', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(plugin.version).toBe(ROUTER_VERSION);
+    expect(pkg.version).toBe(ROUTER_VERSION);
   });
 });

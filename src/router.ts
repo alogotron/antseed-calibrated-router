@@ -16,10 +16,14 @@ import { RouterMetrics, type RankRecord } from './metrics.js';
 export const ROUTER_ID = 'alogos-calibrated-router';
 /** Read-only operational snapshot; contains no secrets and no request content. */
 export const METRICS_PATH = '/_alogos/metrics';
-export const ROUTER_VERSION = '0.1.0';
+export const ROUTER_VERSION = '1.0.0';
 export const EXTRA_NAMESPACE = 'alogos.xyz';
 export const DEFAULT_SCORES_URL = 'https://modelgrep.com/api/v1/models';
 export const DEFAULT_REFRESH_MS = 6 * 60 * 60_000;
+/** Retry delay after a failed score fetch, so one outage does not pin rankings to the prior for a full interval. */
+export const FAILED_REFRESH_RETRY_MS = 60_000;
+/** Retry-After seconds sent with a 503 `unavailable` problem. */
+export const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
 /** Cost penalty per tradeoff step (lambda = t * weight); t = 10 ranks purely by cost. */
 export const DEFAULT_COST_WEIGHT = 0.04;
 /** Skill assumed for models without a benchmark score (conservative prior). */
@@ -154,7 +158,7 @@ function problem(requestId: string, statusCode: number, type: string, title: str
  */
 export class CalibratedRouter {
   private skills: Skills = { intelligence: new Map(), coding: new Map() };
-  private loadedAt = -Infinity;
+  private nextRefreshAt = -Infinity;
   private refreshing: Promise<void> | null = null;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
@@ -175,7 +179,18 @@ export class CalibratedRouter {
     return [{ id: IRP_ANY_MODEL }];
   }
 
+  /** Never throws: unexpected failures become an IRP `unavailable` problem (503, Retry-After). */
   async handleRequest(request: SerializedHttpRequest): Promise<SerializedHttpResponse> {
+    try {
+      return await this.dispatch(request);
+    } catch {
+      this.metrics.request(503);
+      const response = problem(request.requestId, 503, IRP_PROBLEM_TYPES.unavailable, 'Unavailable', 'The routing service hit an internal error; retry shortly.');
+      return { ...response, headers: { ...response.headers, 'retry-after': String(UNAVAILABLE_RETRY_AFTER_SECONDS) } };
+    }
+  }
+
+  private async dispatch(request: SerializedHttpRequest): Promise<SerializedHttpResponse> {
     const path = request.path.split('?')[0];
     if (request.method === 'GET' && path === IRP_MODELS_PATH) {
       this.metrics.modelsListed();
@@ -290,7 +305,7 @@ export class CalibratedRouter {
   }
 
   private async refreshIfStale(): Promise<void> {
-    if (this.now() - this.loadedAt >= (this.options.refreshMs ?? DEFAULT_REFRESH_MS)) await this.refresh();
+    if (this.now() >= this.nextRefreshAt) await this.refresh();
   }
 
   /** A failed fetch keeps the last good skills (or ranks everything at the unscored prior). */
@@ -298,7 +313,8 @@ export class CalibratedRouter {
     this.refreshing ??= (async () => {
       const skills = await this.fetchSkills().catch(() => null);
       if (skills) this.skills = skills;
-      this.loadedAt = this.now();
+      const interval = this.options.refreshMs ?? DEFAULT_REFRESH_MS;
+      this.nextRefreshAt = this.now() + (skills ? interval : Math.min(interval, FAILED_REFRESH_RETRY_MS));
     })().finally(() => { this.refreshing = null; });
     return this.refreshing;
   }

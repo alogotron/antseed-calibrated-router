@@ -51,6 +51,11 @@ const mean = (values: number[]): number =>
 
 const round = (value: number, digits: number): number => Math.round(value * 10 ** digits) / 10 ** digits;
 
+/** Distinct top-candidate ids tracked; ids are buyer-supplied, so the map must stay bounded. */
+export const MAX_TOP_CANDIDATE_KEYS = 256;
+/** Bucket for top-candidate ids seen after the key limit is reached. */
+export const OTHER_TOP_CANDIDATE = '(other)';
+
 /** Bounded collector: counters plus a rolling window of rank records. */
 export class RouterMetrics {
   private readonly startedAt = Date.now();
@@ -93,7 +98,9 @@ export class RouterMetrics {
     this.records.push(full);
     if (this.records.length > this.window) this.records.shift();
     if (full.topCandidateId) {
-      this.byTopCandidate[full.topCandidateId] = (this.byTopCandidate[full.topCandidateId] ?? 0) + 1;
+      const known = Object.prototype.hasOwnProperty.call(this.byTopCandidate, full.topCandidateId);
+      const key = known || Object.keys(this.byTopCandidate).length < MAX_TOP_CANDIDATE_KEYS ? full.topCandidateId : OTHER_TOP_CANDIDATE;
+      this.byTopCandidate[key] = (this.byTopCandidate[key] ?? 0) + 1;
     }
     this.persist(full);
   }

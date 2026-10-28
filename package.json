@@ -1,10 +1,11 @@
 {
   "name": "@alogos/antseed-calibrated-router",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Difficulty-aware IRP routing provider for AntSeed: ranks candidates by calibrated success probability vs expected cost",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,7 +14,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test && npm run build",
-    "conformance": "node scripts/conformance.mjs"
+    "conformance": "node scripts/conformance.mjs",
+    "prepublishOnly": "npm run verify && npm run conformance"
   },
   "peerDependencies": {
     "@antseed/node": ">=0.2.150"
@@ -27,5 +29,15 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alogotron/antseed-calibrated-router.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   }
 }
